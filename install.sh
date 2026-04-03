@@ -2,28 +2,26 @@
 
 echo "--- Rozpoczynam automatyczna instalacje systemu skanowania N01 ---"
 
-# 1. Instalacja wymaganych narzedzi
-echo "Aktualizacja pakietow i instalacja Dockera..."
-sudo apt update
-sudo apt install -y docker.io docker-compose curl python3 python3-pip
+echo "1/5 Czyszczenie starych wersji Dockera..."
+sudo apt-get remove -y docker.io docker-compose docker-doc podman-docker containerd runc 2>/dev/null
 
-# 2. Przygotowanie czystego środowiska
-echo "Przygotowanie srodowiska..."
+echo "2/5 Instalacja wymaganych narzedzi (Python, Curl)..."
+sudo apt-get update
+sudo apt-get install -y curl python3 python3-pip
+
+echo "3/5 Instalacja najnowszego Dockera v2 z oficjalnego zrodla..."
+curl -fsSL https://get.docker.com | sudo sh
+
+echo "4/5 Przygotowanie srodowiska Greenbone..."
 mkdir -p ~/bso_skaner
 cd ~/bso_skaner
-rm -f docker-compose.yml compose.yaml # Usuwamy smieci po ew. starych probach
-
-# 3. Pobranie Dockera prosto z kodu zrodlowego Greenbone (GWARANTOWANY LINK)
-echo "Pobieranie konfiguracji Greenbone..."
-curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o docker-compose.yml
-
-# 4. Przygotowanie pliku na nasz skrypt w Pythonie
-echo "Tworzenie bazy pod skrypt zarzadzajacy..."
+rm -f docker-compose.yml compose.yaml
+curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
 touch skaner.py 
 
-# 5. Uruchomienie calosci
-echo "Uruchamianie kontenerow Greenbone w tle..."
-sudo docker-compose up -d
+echo "5/5 Uruchamianie kontenerow w tle (nowy Docker Compose v2)..."
+# Zauwaz, ze teraz komenda to "docker compose", a nie "docker-compose"
+sudo docker compose up -d
 
 echo "--- Instalacja zakonczona sukcesem! ---"
-echo "System Greenbone dziala w tle. Pobieranie bazy podatnosci zajmie chwile."
+echo "System Greenbone dziala w tle. Baza podatnosci pobierze sie automatycznie."
