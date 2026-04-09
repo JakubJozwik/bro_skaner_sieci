@@ -14,10 +14,8 @@ from gvm.transforms import EtreeCheckCommandTransform
 # ==========================================
 # KONFIGURACJA SYSTEMU I RAPORTOWANIA
 # ==========================================
-# Ścieżka do socketu (stała dzięki wymuszonej nazwie projektu w Install.sh)
 PATH_TO_SOCKET = "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock"
 
-# Funkcja wykrywająca lokalne IP komputera (aby skaner zawsze miał cel)
 def pobierz_lokalne_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -30,7 +28,6 @@ def pobierz_lokalne_ip():
 
 TARGET_IP = pobierz_lokalne_ip()
 
-# Dane do wysyłki e-mail
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 EMAIL_SENDER = "basketkuba.05@gmail.com"
@@ -74,7 +71,6 @@ def prowadz_skanowanie():
     with Gmp(connection=connection, transform=transform) as gmp:
         gmp.authenticate("admin", "admin")
         
-        # Sprawdzenie dostępności konfiguracji (czy bazy się pobrały)
         configs = gmp.get_scan_configs()
         config_id = None
         for c in configs.findall('.//config'):
@@ -85,10 +81,8 @@ def prowadz_skanowanie():
         if not config_id:
             raise Exception("Bazy NVT wciąż się synchronizują. Spróbuj za 15 minut.")
 
-        # Pobranie portów
         port_list_id = gmp.get_port_lists()[0].get('id')
 
-        # Tworzenie celu (z opcją Consider Alive - ważne!)
         print("[+] Tworzenie celu skanowania...")
         target_res = gmp.create_target(
             name=f"Skan_{int(time.time())}", 
@@ -98,10 +92,8 @@ def prowadz_skanowanie():
         )
         target_id = target_res.get('id')
         
-        # Pobranie skanera
-        scanner_id = "08b69003-5fc2-4037-a479-93b440211c73" # Domyślny OpenVAS
+        scanner_id = "08b69003-5fc2-4037-a479-93b440211c73"
 
-        # Zadanie
         print("[+] Startowanie zadania...")
         task = gmp.create_task(name=f"Zadanie_{TARGET_IP}", config_id=config_id, target_id=target_id, scanner_id=scanner_id)
         task_id = task.get('id')
@@ -110,13 +102,17 @@ def prowadz_skanowanie():
         while True:
             t = gmp.get_task(task_id)
             status = t.find(".//status").text
-            prog = t.find(".//progress").text if t.find(".//progress") is not None else "0"
+            prog_elem = t.find(".//progress")
+            prog = prog_elem.text if prog_elem is not None else "0"
             print(f"[*] Postęp: {status} ({prog}%)")
-            if status in ["Done", "Stopped", "Finished"]: break
+            if status in ["Done", "Stopped", "Finished"]:
+                break
             time.sleep(30)
             
-        # Pobieranie raportu PDF
-        print("[+] Generowanie PDF...")
+        print("[+] Skanowanie zakończone. Czekam 15s na wygenerowanie raportu PDF...")
+        time.sleep(15)
+
+        print("[+] Pobieranie raportu PDF...")
         report_id = t.find(".//last_report/report").get("id")
         
         pdf_format_id = None
@@ -125,8 +121,16 @@ def prowadz_skanowanie():
                 pdf_format_id = f.get('id')
                 break
                 
+        if not pdf_format_id:
+            raise Exception("Nie znaleziono formatu PDF w systemie.")
+
         report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
-        return base64.b64decode(report.find(".//report").text)
+        raw_pdf = report.find(".//report").text
+        
+        if raw_pdf is None:
+            raise Exception("Serwer zwrócił pusty raport. Spróbuj zwiększyć czas oczekiwania.")
+
+        return base64.b64decode(raw_pdf)
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
