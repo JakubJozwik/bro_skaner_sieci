@@ -1,17 +1,13 @@
-import time
-import smtplib
-import socket
-import os
-import xml.etree.ElementTree as ET
+import time, smtplib, socket, os, xml.etree.ElementTree as ET
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# ==========================================
-# KONFIGURACJA
-# ==========================================
 PATH_TO_SOCKET = "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock"
+EMAIL_SENDER = "basketkuba.05@gmail.com"
+EMAIL_PASSWORD = "bhck irya mxdj xdec" 
+EMAIL_RECEIVER = "basketkuba.05@gmail.com"
 
-def pobierz_moje_ip():
+def pobierz_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -20,17 +16,11 @@ def pobierz_moje_ip():
         return ip
     except: return "127.0.0.1"
 
-TARGET_IP = pobierz_moje_ip()
-EMAIL_SENDER = "basketkuba.05@gmail.com"
-EMAIL_PASSWORD = "bhck irya mxdj xdec" 
-EMAIL_RECEIVER = "basketkuba.05@gmail.com"
-
-def wyslij_email(tresc):
-    print(f"[+] Wysyłanie raportu na adres: {EMAIL_RECEIVER}")
+def wyslij_email(tresc, cel):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
-    msg['Subject'] = f"FINALNY RAPORT SKANOWANIA N01 - {TARGET_IP}"
+    msg['Subject'] = f"RAPORT N01 - CEL: {cel}"
     msg.attach(MIMEText(tresc, 'plain'))
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -38,85 +28,57 @@ def wyslij_email(tresc):
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("[+] RAPORT WYSLANY NA E-MAIL!")
-    except Exception as e: print(f"[-] Błąd SMTP: {e}")
+        print("[+] MAIL WYSLANY!")
+    except Exception as e: print(f"[-] Blad SMTP: {e}")
 
 def prowadz_skanowanie():
     from gvm.connections import UnixSocketConnection
     from gvm.protocols.gmp import Gmp
     from gvm.transforms import EtreeCheckCommandTransform
 
-    print(f"[!] Start procedury dla: {TARGET_IP}")
-    if not os.path.exists(PATH_TO_SOCKET):
-        raise Exception("Gniazdo API jeszcze nie gotowe.")
-
-    connection = UnixSocketConnection(path=PATH_TO_SOCKET)
-    transform = EtreeCheckCommandTransform()
-    
-    with Gmp(connection=connection, transform=transform) as gmp:
+    cel = pobierz_ip()
+    print(f"[!] Start: {cel}")
+    with Gmp(connection=UnixSocketConnection(path=PATH_TO_SOCKET), transform=EtreeCheckCommandTransform()) as gmp:
         gmp.authenticate("admin", "admin")
         
-        configs = gmp.get_scan_configs()
-        config_id = configs[0].get('id')
-        port_list_id = gmp.get_port_lists()[0].get('id')
+        cfg_id = gmp.get_scan_configs()[0].get('id')
+        tgt = gmp.create_target(name=f"S_{int(time.time())}", hosts=[cel], port_list_id=gmp.get_port_lists()[0].get('id'), alive_test="Consider Alive")
+        tgt_id = tgt.get('id')
         
-        target = gmp.create_target(name=f"Skan_{int(time.time())}", hosts=[TARGET_IP], port_list_id=port_list_id, alive_test="Consider Alive")
-        target_id = target.get('id')
-        
-        task = gmp.create_task(name=f"Zadanie_{TARGET_IP}", config_id=config_id, target_id=target_id, scanner_id="08b69003-5fc2-4037-a479-93b440211c73")
-        task_id = task.get('id')
-        gmp.start_task(task_id)
+        task = gmp.create_task(name="Zadanie_BSO", config_id=cfg_id, target_id=tgt_id, scanner_id="08b69003-5fc2-4037-a479-93b440211c73")
+        tid = task.get('id')
+        gmp.start_task(tid)
         
         while True:
-            t = gmp.get_task(task_id)
+            t = gmp.get_task(tid)
             status = t.find(".//status").text
-            prog = t.find(".//progress").text if t.find(".//progress") is not None else "0"
-            print(f"[*] Status: {status} ({prog}%)")
+            print(f"[*] Status: {status}")
             if status in ["Done", "Stopped", "Finished"]: break
             time.sleep(20)
             
-        print("[+] Pobieranie danych z bazy (bez filtrów)...")
-        time.sleep(10)
+        print("[+] Pobieranie danych...")
+        time.sleep(15)
         
-        # POBIERANIE RAPORTU - NOWA METODA DLA GMPv226
-        all_reports = gmp.get_reports()
-        report_id = None
-        
-        for r in all_reports.findall(".//report"):
-            task_node = r.find("task")
-            if task_node is not None and task_node.get("id") == task_id:
-                report_id = r.get("id")
+        # Pobieranie raportu (metoda kompatybilna ze wszystkimi wersjami)
+        r_list = gmp.get_reports()
+        rid = None
+        for r in r_list.findall(".//report"):
+            if r.find("task").get("id") == tid:
+                rid = r.get("id")
                 break
         
-        if not report_id:
-            raise Exception("Nie znaleziono raportu dla tego zadania.")
-        
-        response = gmp.get_report(report_id, details=True)
-        
-        wyniki = f"RAPORT SKANOWANIA SIECI N01\nCEL: {TARGET_IP}\nSTATUS: {status}\n"
-        wyniki += "="*40 + "\n\n"
-        
+        res = gmp.get_report(rid, details=True)
+        wyniki = f"RAPORT DLA: {cel}\n" + "="*30 + "\n"
         found = False
-        for result in response.findall(".//results/result"):
+        for rs in res.findall(".//results/result"):
             found = True
-            name_node = result.find("name")
-            port_node = result.find("port")
-            sev_node = result.find("severity")
-            
-            name = name_node.text if name_node is not None else "Unknown"
-            port = port_node.text if port_node is not None else "Unknown"
-            severity = sev_node.text if sev_node is not None else "Info"
-            
-            wyniki += f"[{severity}] {name}\nPORT: {port}\n"
-            wyniki += "-"*20 + "\n"
-            
-        if not found:
-            wyniki += "Skanowanie nie wykazalo krytycznych podatnosci."
-            
-        return wyniki
+            wyniki += f"[{rs.find('severity').text}] {rs.find('name').text} (Port: {rs.find('port').text})\n"
+        
+        if not found: wyniki += "Brak podatnosci."
+        return wyniki, cel
 
 if __name__ == "__main__":
     try:
-        raport = prowadz_skanowanie()
-        wyslij_email(raport)
-    except Exception as e: print(f"[-] BŁĄD KRYTYCZNY: {e}")
+        r, c = prowadz_skanowanie()
+        wyslij_email(r, c)
+    except Exception as e: print(f"[-] Blad: {e}")
