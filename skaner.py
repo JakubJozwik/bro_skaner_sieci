@@ -34,20 +34,20 @@ EMAIL_SENDER = "basketkuba.05@gmail.com"
 EMAIL_PASSWORD = "bhck irya mxdj xdec" 
 EMAIL_RECEIVER = "basketkuba.05@gmail.com"
 
-def wyslij_email(pdf_data):
-    print(f"[+] Wysyłanie raportu na adres: {EMAIL_RECEIVER}")
+def wyslij_email(raport_text):
+    print(f"[+] Wysyłanie raportu tekstowego na adres: {EMAIL_RECEIVER}")
     msg = MIMEMultipart()
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
     msg['Subject'] = f"Raport Bezpieczeństwa N01 - Cel: {TARGET_IP}"
     
-    body = f"Dzień dobry,\n\nAutomatyczny skan podatności dla adresu {TARGET_IP} został zakończony.\nRaport PDF w załączniku.\n\nPozdrawiamy,\nSystem N01 (BSO)"
+    body = f"Dzień dobry,\n\nAutomatyczny skan podatności dla adresu {TARGET_IP} został zakończony.\nRaport w formie pliku tekstowego znajduje się w załączniku.\n\nPozdrawiamy,\nSystem N01 (BSO)"
     msg.attach(MIMEText(body, 'plain'))
     
     part = MIMEBase('application', 'octet-stream')
-    part.set_payload(pdf_data)
+    part.set_payload(raport_text)
     encoders.encode_base64(part)
-    part.add_header('Content-Disposition', 'attachment; filename="Raport_Bezpieczenstwa.pdf"')
+    part.add_header('Content-Disposition', 'attachment; filename="Raport_Skanowania.txt"')
     msg.attach(part)
 
     try:
@@ -56,7 +56,7 @@ def wyslij_email(pdf_data):
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("[+] E-mail wysłany!")
+        print("[+] E-mail z raportem TXT wysłany!")
     except Exception as e:
         print(f"[-] Błąd SMTP: {e}")
 
@@ -79,7 +79,7 @@ def prowadz_skanowanie():
                 break
         
         if not config_id:
-            raise Exception("Bazy NVT wciąż się synchronizują. Spróbuj za 15 minut.")
+            raise Exception("Bazy NVT wciąż się synchronizują. Spróbuj za chwilę.")
 
         port_list_id = gmp.get_port_lists()[0].get('id')
 
@@ -109,35 +109,37 @@ def prowadz_skanowanie():
                 break
             time.sleep(30)
             
-        print("[+] Skanowanie zakończone. Czekam 15s na wygenerowanie raportu PDF...")
-        time.sleep(15)
+        print("[+] Skanowanie zakończone. Czekam 30s na sfinalizowanie bazy raportów...")
+        time.sleep(30)
 
-        print("[+] Pobieranie raportu PDF...")
+        print("[+] Pobieranie raportu w formacie TXT...")
         report_id = t.find(".//last_report/report").get("id")
         
-        pdf_format_id = None
+        txt_format_id = None
         for f in gmp.get_report_formats().findall('.//report_format'):
-            if f.find('name').text == 'PDF':
-                pdf_format_id = f.get('id')
+            # Szukamy formatu TXT lub Text
+            if f.find('name').text in ['TXT', 'Text']:
+                txt_format_id = f.get('id')
                 break
                 
-        if not pdf_format_id:
-            raise Exception("Nie znaleziono formatu PDF w systemie.")
+        if not txt_format_id:
+            # Jeśli nie ma TXT, weźmiemy cokolwiek co nie jest PDF (np. Anonymous XML)
+            txt_format_id = gmp.get_report_formats()[0].get('id')
 
-        report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
-        raw_pdf = report.find(".//report").text
+        report = gmp.get_report(report_id, report_format_id=txt_format_id, ignore_pagination=True)
+        raw_report = report.find(".//report").text
         
-        if raw_pdf is None:
-            raise Exception("Serwer zwrócił pusty raport. Spróbuj zwiększyć czas oczekiwania.")
+        if raw_report is None:
+            raise Exception("Serwer nadal nie udostępnił treści raportu.")
 
-        return base64.b64decode(raw_pdf)
+        return base64.b64decode(raw_report)
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
         print("Uruchom jako root (sudo)!")
         exit(1)
     try:
-        pdf = prowadz_skanowanie()
-        wyslij_email(pdf)
+        data = prowadz_skanowanie()
+        wyslij_email(data)
     except Exception as e:
         print(f"[-] BŁĄD: {e}")
