@@ -23,7 +23,11 @@ cd /opt/bso_skaner
 # Pobieranie oficjalnego pliku Docker Compose od Greenbone
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
 
-# Pobieranie Twojego skryptu skanującego (Upewnij się, że nazwa pliku na GitHub jest identyczna!)
+# --- NAPRAWA KONFLIKTU PORTÓW (Ważne dla Windows/VMware) ---
+# Zamieniamy port 443 na 9392, aby uniknąć błędu "Port already in use"
+sed -i 's/- 127.0.0.1:443:8080/- 127.0.0.1:9392:8080/g' compose.yaml
+
+# Pobieranie Twojego skryptu skanującego z GitHuba
 curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/refs/heads/main/skaner.py" -o skaner.py
 chmod +x skaner.py
 
