@@ -20,7 +20,7 @@ rm -f docker-compose.yml compose.yaml
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
 
 # Przygotowanie czystego pliku pod skrypt w Pythonie
-touch skaner.py 
+curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/refs/heads/main/skaner.py" -o skaner.py
 
 echo "5/5 Uruchamianie kontenerow w tle (nowy Docker Compose v2)..."
 sudo docker compose up -d
