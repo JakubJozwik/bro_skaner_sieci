@@ -34,7 +34,7 @@ chmod +x skaner.py
 
 echo "[3/5] Uruchamianie silnika skanera (Docker)..."
 # Wymuszamy nazwę projektu, aby ścieżka do wolumenu w skaner.py zawsze się zgadzała
-docker-compose -p greenbone-community-edition up -d
+docker compose -p greenbone-community-edition up -d
 
 echo "[4/5] Konfiguracja harmonogramu Cron (Co niedzielę o 02:00)..."
 (crontab -l 2>/dev/null; echo "0 2 * * 0 /usr/bin/python3 /opt/bso_skaner/skaner.py >> /var/log/bso_skaner.log 2>&1") | crontab -
