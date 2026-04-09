@@ -1,97 +1,133 @@
-import os
-import smtplib
 import time
+import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
+from gvm.connections import UnixSocketConnection
+from gvm.protocols.gmp import Gmp
+from gvm.transforms import EtreeCheckCommandTransform
 
 # ==========================================
 # KONFIGURACJA SKANERA I RAPORTOWANIA
 # ==========================================
-# Adres sieci lokalnej do przeskanowania (np. Twoja sieć domowa/studencka)
-TARGET_IP = "192.168.1.0/24"  
+# Ścieżka do gniazda komunikacyjnego kontenera (standard w Dockerze dla GVM)
+PATH_TO_SOCKET = "/run/gvmd/gvmd.sock" 
+TARGET_IP = "192.168.1.0/24" # Adres Twojej sieci
 
-# Konfiguracja poczty wychodzącej (najlepiej użyć konta Gmail)
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-EMAIL_SENDER = "basketkuba.05@gmail.com"
-# UWAGA: Do Gmaila nie wpisujesz zwykłego hasła, tylko 16-znakowe "Hasło Aplikacji" 
-# (do wygenerowania w ustawieniach konta Google w zakładce Bezpieczeństwo)
-EMAIL_PASSWORD ="bhck irya mxdj xdec" 
-EMAIL_RECEIVER = "basketkuba.05@gmail.com"
+EMAIL_SENDER = "twoj_mail@gmail.com"
+EMAIL_PASSWORD = "twoje_16_znakowe_haslo_aplikacji"
+EMAIL_RECEIVER = "twoj_mail@gmail.com"
 
-def uruchom_skanowanie():
-    """Moduł odpowiedzialny za komunikację z kontenerem Greenbone"""
-    print(f"[+] Inicjalizacja środowiska Greenbone Security Assistant...")
-    time.sleep(1)
-    print(f"[+] Zlecam zadanie skanowania sieci: {TARGET_IP} (Protokół OSP)...")
-    
-    # Symulacja oczekiwania na API GVM (w środowisku testowym BSO)
-    time.sleep(2) 
-    print("[+] Skanowanie w toku. Analiza podatności NVT...")
-    time.sleep(2)
-    print("[+] Skanowanie zakończone sukcesem!")
-    
-    nazwa_pliku = "Raport_Podatnosci_BSO.pdf"
-    
-    # Tworzenie atrapy raportu PDF na potrzeby obrony projektu, 
-    # aby uniknąć konieczności generowania prawdziwego raportu trwającego 1h+
-    with open(nazwa_pliku, "w") as f:
-        f.write("%PDF-1.4\nTo jest automatycznie wygenerowany raport bezpieczenstwa z sytemu Greenbone (Temat N01).")
-        
-    return nazwa_pliku
-
-def wyslij_email(nazwa_pliku):
-    """Moduł odpowiedzialny za wysłanie raportu do użytkownika końcowego"""
-    print(f"[+] Przygotowuję e-mail z załącznikiem: {nazwa_pliku}")
-    
+def wyslij_email(pdf_data, nazwa_pliku):
+    print("[+] Przygotowuję wysyłkę prawdziwego raportu PDF...")
     msg = MIMEMultipart()
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
-    msg['Subject'] = f"Automatyczny Raport Bezpieczeństwa - Sieć {TARGET_IP}"
-
+    msg['Subject'] = f"RAPORT BEZPIECZEŃSTWA: Sieć {TARGET_IP}"
+    
     body = (
-        "Witaj,\n\n"
-        "W załączniku przesyłam automatycznie wygenerowany raport ze skanowania podatności "
-        f"Twojej sieci o adresie {TARGET_IP}.\n\n"
-        "Pozdrawiam,\n"
-        "Twój Automatyczny Skaner N01 (BSO)"
+        f"Witaj,\n\n"
+        f"W załączeniu przesyłam pełny, automatycznie wygenerowany raport podatności "
+        f"dla sieci {TARGET_IP}. Skan został wykonany przez silnik Greenbone.\n\n"
+        f"Pozdrawiam,\nSystem N01 (BSO)"
     )
     msg.attach(MIMEText(body, 'plain'))
+    
+    # Dołączanie surowych danych PDF
+    part = MIMEBase('application', 'octet-stream')
+    part.set_payload(pdf_data)
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f"attachment; filename={nazwa_pliku}")
+    msg.attach(part)
 
-    # Dołączanie pliku PDF do wiadomości
     try:
-        with open(nazwa_pliku, "rb") as attachment:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment.read())
-        encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f"attachment; filename= {nazwa_pliku}")
-        msg.attach(part)
-    except Exception as e:
-        print(f"[-] Błąd przetwarzania pliku: {e}")
-        return
-
-    print("[+] Łączenie z zewnętrznym serwerem SMTP...")
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls() # Szyfrowanie połączenia TLS
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print(f"[+] Sukces! E-mail z raportem został pomyślnie wysłany na adres: {EMAIL_RECEIVER}")
+        print("[+] Raport wysłany pomyślnie na Twój e-mail!")
     except Exception as e:
-        print(f"[-] Wystąpił błąd podczas wysyłania wiadomości: {e}")
-        print("    Wskazówka: Upewnij się, że używasz 'Hasła Aplikacji' a nie zwykłego hasła do konta!")
+        print(f"[-] Błąd SMTP (Sprawdź hasło aplikacji): {e}")
+
+def prowadz_skanowanie():
+    print("[+] Łączenie z silnikiem Greenbone (Unix Socket)...")
+    connection = UnixSocketConnection(path=PATH_TO_SOCKET)
+    transform = EtreeCheckCommandTransform()
+    
+    with Gmp(connection=connection, transform=transform) as gmp:
+        # 1. Logowanie (używamy domyślnych danych z oficjalnego kontenera)
+        print("[+] Logowanie do API (admin/admin)...")
+        gmp.authenticate("admin", "admin")
+        
+        # 2. Tworzenie celu (Target) w bazie skanera
+        print(f"[+] Konfiguracja celu skanowania: {TARGET_IP}")
+        response = gmp.create_target(name=f"Skan_{int(time.time())}", hosts=[TARGET_IP])
+        target_id = response.get('id')
+        
+        # 3. Pobranie ID domyślnej konfiguracji skanu (tzw. Full and Fast)
+        configs = gmp.get_scan_configs()
+        # Wybieramy pierwszy podstawowy profil
+        config_id = configs[0].get('id') 
+        
+        # 4. Tworzenie i uruchomienie zadania
+        print("[+] Tworzenie zadania skanowania...")
+        # scanner_id to domyślny skaner OpenVAS w systemie Greenbone
+        task = gmp.create_task(
+            name="Zadanie BSO - Automatyczne", 
+            config_id=config_id, 
+            target_id=target_id, 
+            scanner_id="08b69003-5fc2-4037-a479-93b440211c73"
+        )
+        task_id = task.get('id')
+        
+        print("[+] Uruchamianie skanera. To potrwa (od 15 minut do paru godzin zależnie od sieci)...")
+        gmp.start_task(task_id)
+        
+        # 5. Monitorowanie postępu (Czekamy, aż skaner skończy pracę)
+        while True:
+            t = gmp.get_task(task_id)
+            status = t.find(".//status").text
+            
+            # Zapobiegamy błędowi, gdy progress jeszcze nie istnieje (wczesna faza 'Requested')
+            progress_elem = t.find(".//progress")
+            progress = progress_elem.text if progress_elem is not None else "0"
+            
+            print(f"[*] Status: {status} ({progress}%)")
+            
+            if status in ["Done", "Stopped", "Finished"]:
+                break
+                
+            time.sleep(30) # Odpytuj silnik co 30 sekund
+            
+        # 6. Pobranie raportu
+        report_id = t.find(".//last_report/report").get("id")
+        # Format ID dla PDF w systemach GVM to stała wartość
+        pdf_format_id = "c402cc3e-b531-11e1-912c-40618e014475"
+        
+        print("[+] Generowanie końcowego dokumentu PDF...")
+        report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
+        
+        # Wyciąganie surowych danych PDF (są zakodowane w base64 wewnątrz odpowiedzi XML)
+        import base64
+        pdf_content = base64.b64decode(report.find(".//report").text)
+        
+        return pdf_content
 
 if __name__ == "__main__":
     print("="*50)
-    print(" AUTOMATYCZNY SYSTEM SKANOWANIA SIECI (PROJEKT BSO)")
+    print(" PEŁNOPRAWNY SYSTEM SKANOWANIA SIECI (API GMP)")
     print("="*50)
     
-    plik_raportu = uruchom_skanowanie()
-    wyslij_email(plik_raportu)
-    
+    try:
+        pdf_data = prowadz_skanowanie()
+        wyslij_email(pdf_data, "Prawdziwy_Raport_Sieci.pdf")
+    except Exception as e:
+        print(f"[-] Otrzymano błąd z silnika: {e}")
+        print("    Wskazówka: Jeśli to błąd 'Scanner not available' lub podobny,")
+        print("    oznacza to, że kontenery pobierają bazę NVT w tle. Daj im około godziny.")
+        
     print("="*50)
     print(" ZADANIE ZAKOŃCZONE")
     print("="*50)
