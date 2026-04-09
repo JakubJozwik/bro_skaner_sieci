@@ -66,9 +66,19 @@ def prowadz_skanowanie():
         print("[+] Logowanie do API (admin/admin)...")
         gmp.authenticate("admin", "admin")
         
-        # 2. Tworzenie celu (Target) w bazie skanera
+        # 2. Pobranie ID domyślnej listy portów (wymagane w nowych wersjach GVM)
+        print("[+] Pobieranie domyślnej listy portów do skanowania...")
+        port_lists_response = gmp.get_port_lists()
+        # Wyciągamy ID pierwszej dostępnej listy (zazwyczaj "All IANA assigned TCP")
+        port_list_id = port_lists_response.find('.//port_list').get('id')
+
+        # 3. Tworzenie celu (Target) w bazie skanera z wymaganymi portami
         print(f"[+] Konfiguracja celu skanowania: {TARGET_IP}")
-        response = gmp.create_target(name=f"Skan_{int(time.time())}", hosts=[TARGET_IP])
+        response = gmp.create_target(
+            name=f"Skan_{int(time.time())}", 
+            hosts=[TARGET_IP], 
+            port_list_id=port_list_id
+        )
         target_id = response.get('id')
         
         # 3. Pobranie ID domyślnej konfiguracji skanu (tzw. Full and Fast)
