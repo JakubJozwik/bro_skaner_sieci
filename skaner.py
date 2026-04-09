@@ -34,20 +34,20 @@ EMAIL_SENDER = "basketkuba.05@gmail.com"
 EMAIL_PASSWORD = "bhck irya mxdj xdec" 
 EMAIL_RECEIVER = "basketkuba.05@gmail.com"
 
-def wyslij_email(raport_text):
-    print(f"[+] Wysyłanie raportu tekstowego na adres: {EMAIL_RECEIVER}")
+def wyslij_email(raport_data, nazwa_pliku):
+    print(f"[+] Wysyłanie raportu ({nazwa_pliku}) na adres: {EMAIL_RECEIVER}")
     msg = MIMEMultipart()
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
     msg['Subject'] = f"Raport Bezpieczeństwa N01 - Cel: {TARGET_IP}"
     
-    body = f"Dzień dobry,\n\nAutomatyczny skan podatności dla adresu {TARGET_IP} został zakończony.\nRaport w formie pliku tekstowego znajduje się w załączniku.\n\nPozdrawiamy,\nSystem N01 (BSO)"
+    body = f"Dzień dobry,\n\nAutomatyczny skan podatności dla adresu {TARGET_IP} został zakończony.\nRaport znajduje się w załączniku.\n\nPozdrawiamy,\nSystem N01 (BSO)"
     msg.attach(MIMEText(body, 'plain'))
     
     part = MIMEBase('application', 'octet-stream')
-    part.set_payload(raport_text)
+    part.set_payload(raport_data)
     encoders.encode_base64(part)
-    part.add_header('Content-Disposition', 'attachment; filename="Raport_Skanowania.txt"')
+    part.add_header('Content-Disposition', f'attachment; filename="{nazwa_pliku}"')
     msg.attach(part)
 
     try:
@@ -56,7 +56,7 @@ def wyslij_email(raport_text):
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("[+] E-mail z raportem TXT wysłany!")
+        print(f"[+] E-mail z plikiem {nazwa_pliku} wysłany!")
     except Exception as e:
         print(f"[-] Błąd SMTP: {e}")
 
@@ -79,7 +79,7 @@ def prowadz_skanowanie():
                 break
         
         if not config_id:
-            raise Exception("Bazy NVT wciąż się synchronizują. Spróbuj za chwilę.")
+            raise Exception("Bazy NVT wciąż się synchronizują.")
 
         port_list_id = gmp.get_port_lists()[0].get('id')
 
@@ -107,39 +107,46 @@ def prowadz_skanowanie():
             print(f"[*] Postęp: {status} ({prog}%)")
             if status in ["Done", "Stopped", "Finished"]:
                 break
-            time.sleep(30)
+            time.sleep(20)
             
-        print("[+] Skanowanie zakończone. Czekam 30s na sfinalizowanie bazy raportów...")
-        time.sleep(30)
-
-        print("[+] Pobieranie raportu w formacie TXT...")
+        print("[+] Skanowanie zakończone. Przechodzę do pobierania raportu...")
         report_id = t.find(".//last_report/report").get("id")
         
-        txt_format_id = None
-        for f in gmp.get_report_formats().findall('.//report_format'):
-            # Szukamy formatu TXT lub Text
-            if f.find('name').text in ['TXT', 'Text']:
-                txt_format_id = f.get('id')
-                break
-                
-        if not txt_format_id:
-            # Jeśli nie ma TXT, weźmiemy cokolwiek co nie jest PDF (np. Anonymous XML)
-            txt_format_id = gmp.get_report_formats()[0].get('id')
+        # PĘTLA POBIERANIA (Próbujemy przez 5 minut)
+        for proba in range(1, 11):
+            print(f"[*] Próba pobrania raportu ({proba}/10)...")
+            
+            # Najpierw szukamy formatu TXT
+            txt_format_id = None
+            for f in gmp.get_report_formats().findall('.//report_format'):
+                if f.find('name').text in ['TXT', 'Text']:
+                    txt_format_id = f.get('id')
+                    break
+            
+            # Pobieramy raport
+            response = gmp.get_report(report_id, report_format_id=txt_format_id)
+            raw_data_elem = response.find(".//report")
+            
+            if raw_data_elem is not None and raw_data_elem.text:
+                print("[+] Raport pobrany pomyślnie!")
+                return base64.b64decode(raw_report_text := raw_data_elem.text), "Raport.txt"
+            
+            print("[-] Serwer jeszcze nie przygotował treści. Czekam 30s...")
+            time.sleep(30)
 
-        report = gmp.get_report(report_id, report_format_id=txt_format_id, ignore_pagination=True)
-        raw_report = report.find(".//report").text
-        
-        if raw_report is None:
-            raise Exception("Serwer nadal nie udostępnił treści raportu.")
-
-        return base64.b64decode(raw_report)
+        # Jeśli TXT zawiedzie, bierzemy surowy XML jako fallback
+        print("[!] Format TXT zawiódł. Pobieram surowy raport XML jako fallback...")
+        xml_report = gmp.get_report(report_id)
+        # XML raportu w GMP jest zazwyczaj bezpośrednio dostępny
+        import xml.etree.ElementTree as ET
+        return ET.tostring(xml_report, encoding='utf-8'), "Raport_Skanu.xml"
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
         print("Uruchom jako root (sudo)!")
         exit(1)
     try:
-        data = prowadz_skanowanie()
-        wyslij_email(data)
+        data, nazwa_pliku = prowadz_skanowanie()
+        wyslij_email(data, nazwa_pliku)
     except Exception as e:
-        print(f"[-] BŁĄD: {e}")
+        print(f"[-] BŁĄD KRYTYCZNY: {e}")
