@@ -15,9 +15,14 @@ from gvm.transforms import EtreeCheckCommandTransform
 PATH_TO_SOCKET = "/run/gvmd/gvmd.sock" 
 TARGET_IP = "192.168.1.0/24" # Adres Twojej sieci
 
-EMAIL_SENDER = "twoj_mail@gmail.com"
-EMAIL_PASSWORD = "twoje_16_znakowe_haslo_aplikacji"
-EMAIL_RECEIVER = "twoj_mail@gmail.com"
+# Konfiguracja poczty wychodzącej (najlepiej użyć konta Gmail)
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+EMAIL_SENDER = "basketkuba.05@gmail.com"
+# UWAGA: Do Gmaila nie wpisujesz zwykłego hasła, tylko 16-znakowe "Hasło Aplikacji" 
+# (do wygenerowania w ustawieniach konta Google w zakładce Bezpieczeństwo)
+EMAIL_PASSWORD ="bhck irya mxdj xdec" 
+EMAIL_RECEIVER = "basketkuba.05@gmail.com"
 
 def wyslij_email(pdf_data, nazwa_pliku):
     print("[+] Przygotowuję wysyłkę prawdziwego raportu PDF...")
