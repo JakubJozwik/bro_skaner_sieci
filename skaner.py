@@ -12,7 +12,7 @@ from gvm.transforms import EtreeCheckCommandTransform
 # KONFIGURACJA SKANERA I RAPORTOWANIA
 # ==========================================
 # Ścieżka do gniazda komunikacyjnego kontenera (standard w Dockerze dla GVM)
-PATH_TO_SOCKET = "/run/gvmd/gvmd.sock" 
+PATH_TO_SOCKET = "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock"
 TARGET_IP = "192.168.1.0/24" # Adres Twojej sieci
 
 # Konfiguracja poczty wychodzącej (najlepiej użyć konta Gmail)
