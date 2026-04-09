@@ -1,49 +1,45 @@
 #!/bin/bash
 
+# Sprawdzenie czy skrypt jest uruchomiony z uprawnieniami roota
+if [ "$EUID" -ne 0 ]; then 
+  echo "BŁĄD: Proszę uruchomić skrypt z sudo: curl ... | sudo bash"
+  exit 1
+fi
+
 echo "==========================================================="
-echo " Rozpoczynam automatyczna instalacje systemu skanowania N01"
+echo " SYSTEM SKANOWANIA SIECI N01 - INSTALACJA AUTOMATYCZNA"
 echo "==========================================================="
 
-echo "1/6 Czyszczenie starych wersji Dockera..."
-sudo apt-get remove -y docker.io docker-compose docker-doc podman-docker containerd runc 2>/dev/null
+echo "[1/5] Instalacja pakietów systemowych..."
+apt-get update
+apt-get install -y curl python3 python3-pip cron docker.io docker-compose
+# Instalacja bibliotek Python (z obejściem dla nowych systemów)
+pip3 install gvm-tools lxml --break-system-packages 
 
-echo "2/6 Instalacja wymaganych narzedzi (Python, gvm-tools)..."
-sudo apt-get update
-sudo apt-get install -y curl python3 python3-pip cron
+echo "[2/5] Przygotowanie środowiska w /opt/bso_skaner..."
+mkdir -p /opt/bso_skaner
+cd /opt/bso_skaner
 
-# Na nowych systemach (np. Ubuntu 24.04/Debian 12) wymagana jest flaga --break-system-packages
-sudo pip3 install gvm-tools lxml --break-system-packages 
-
-echo "3/6 Instalacja najnowszego Dockera v2..."
-curl -fsSL https://get.docker.com | sudo sh
-
-echo "4/6 Przygotowanie srodowiska Greenbone..."
-mkdir -p /root/bso_skaner
-cd /root/bso_skaner
-rm -f docker-compose.yml compose.yaml skaner.py
-
-# Pobranie compose file ze źródła producenta
+# Pobieranie oficjalnego pliku Docker Compose od Greenbone
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
 
-# UWAGA: Tutaj wstaw prawidlowy adres swojego skryptu z GitHuba
+# Pobieranie Twojego skryptu skanującego (Upewnij się, że nazwa pliku na GitHub jest identyczna!)
 curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/refs/heads/main/skaner.py" -o skaner.py
 chmod +x skaner.py
 
-echo "5/6 Uruchamianie kontenerow (Wymuszam prawidlowa nazwe wolumenu!)..."
-# Parametr -p gwarantuje, że wolumen nazwie się 'greenbone-community-edition'
-sudo docker compose -p greenbone-community-edition up -d
+echo "[3/5] Uruchamianie silnika skanera (Docker)..."
+# Wymuszamy nazwę projektu, aby ścieżka do wolumenu w skaner.py zawsze się zgadzała
+docker-compose -p greenbone-community-edition up -d
 
-echo "6/6 Konfiguracja harmonogramu (Cron)..."
-# Uruchamianie skanu w każdą niedzielę o 2:00 w nocy z logowaniem wyjścia
-(sudo crontab -l 2>/dev/null; echo "0 2 * * 0 /usr/bin/python3 /root/bso_skaner/skaner.py >> /var/log/bso_skaner.log 2>&1") | sudo crontab -
+echo "[4/5] Konfiguracja harmonogramu Cron (Co niedzielę o 02:00)..."
+(crontab -l 2>/dev/null; echo "0 2 * * 0 /usr/bin/python3 /opt/bso_skaner/skaner.py >> /var/log/bso_skaner.log 2>&1") | crontab -
 
+echo "[5/5] Finalizacja..."
 echo "==========================================================="
-echo " INSTALACJA ZAKONCZONA SUKCESEM! "
+echo " INSTALACJA ZAKOŃCZONA SUKCESEM"
 echo "==========================================================="
-echo "UWAGA: Greenbone rozpoczyna pobieranie definicji wirusow i podatnosci (NVT/SCAP/CERT)."
-echo "Proces ten musi sie zakonczyc przed pierwszym uruchomieniem skanera."
-echo "Zostaw serwer wlaczony na ok. 60-120 minut."
-echo ""
-echo "Aby wykonac skan recznie dla testu, wpisz:"
-echo "sudo python3 /root/bso_skaner/skaner.py"
+echo "1. System Greenbone uruchamia się w tle (Docker)."
+echo "2. Pierwsze pobieranie bazy podatności zajmuje ok. 15-30 min."
+echo "3. Aby przetestować system ręcznie, wpisz:"
+echo "   sudo python3 /opt/bso_skaner/skaner.py"
 echo "==========================================================="
