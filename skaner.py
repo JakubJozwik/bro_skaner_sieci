@@ -118,8 +118,19 @@ def prowadz_skanowanie():
             
         # 6. Pobranie raportu
         report_id = t.find(".//last_report/report").get("id")
-        # Format ID dla PDF w systemach GVM to stała wartość
-        pdf_format_id = "c402cc3e-b531-11e1-912c-40618e014475"
+        
+        print("[+] Wyszukiwanie formatu PDF w bazie serwera...")
+        formats_response = gmp.get_report_formats()
+        pdf_format_id = None
+        
+        # Przeszukujemy listę wszystkich dostępnych formatów (XML, CSV, TXT, PDF...)
+        for f in formats_response.findall('.//report_format'):
+            if f.find('name').text == 'PDF':
+                pdf_format_id = f.get('id')
+                break
+                
+        if not pdf_format_id:
+            raise Exception("Nie znaleziono formatu PDF! Kontener 'report-formats' wciąż wgrywa dane.")
         
         print("[+] Generowanie końcowego dokumentu PDF...")
         report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
