@@ -15,7 +15,7 @@ cd /opt/bso_skaner
 # Pobieranie konfiguracji
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
 # Naprawa portu na 8085
-sed -i 's/- 127.0.0.1:[0-9]*:/- 127.0.0.1:8085:/g' compose.yaml
+sed -i 's/- 127.0.0.1:[0-9]*:/- 127.0.0.1:8090:/g' compose.yaml
 
 # Pobieranie skryptu Python (Upewnij się, że link jest poprawny!)
 curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/refs/heads/main/skaner.py" -o skaner.py
