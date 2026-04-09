@@ -119,21 +119,20 @@ def prowadz_skanowanie():
         # 6. Pobranie raportu
         report_id = t.find(".//last_report/report").get("id")
         
-        print("[+] Wyszukiwanie formatu PDF w bazie serwera...")
+print("[+] Wyszukiwanie formatu TXT w bazie serwera (obejscie problemu architektury ARM)...")
         formats_response = gmp.get_report_formats()
-        pdf_format_id = None
+        txt_format_id = None
         
-        # Przeszukujemy listę wszystkich dostępnych formatów (XML, CSV, TXT, PDF...)
         for f in formats_response.findall('.//report_format'):
-            if f.find('name').text == 'PDF':
-                pdf_format_id = f.get('id')
+            if f.find('name').text == 'TXT':
+                txt_format_id = f.get('id')
                 break
                 
-        if not pdf_format_id:
-            raise Exception("Nie znaleziono formatu PDF! Kontener 'report-formats' wciąż wgrywa dane.")
+        if not txt_format_id:
+            raise Exception("Nie znaleziono formatu TXT!")
         
-        print("[+] Generowanie końcowego dokumentu PDF...")
-        report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
+        print("[+] Pobieranie surowego raportu tekstowego...")
+        report = gmp.get_report(report_id, report_format_id=txt_format_id, ignore_pagination=True)
         
         # Wyciąganie surowych danych PDF (są zakodowane w base64 wewnątrz odpowiedzi XML)
         import base64
@@ -146,9 +145,9 @@ if __name__ == "__main__":
     print(" PEŁNOPRAWNY SYSTEM SKANOWANIA SIECI (API GMP)")
     print("="*50)
     
-    try:
-        pdf_data = prowadz_skanowanie()
-        wyslij_email(pdf_data, "Prawdziwy_Raport_Sieci.pdf")
+   try:
+        txt_data = prowadz_skanowanie()
+        wyslij_email(txt_data, "Prawdziwy_Raport_Sieci.txt")
     except Exception as e:
         print(f"[-] Otrzymano błąd z silnika: {e}")
         print("    Wskazówka: Jeśli to błąd 'Scanner not available' lub podobny,")
