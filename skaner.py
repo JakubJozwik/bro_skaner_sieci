@@ -1,5 +1,8 @@
 import time
 import smtplib
+import socket
+import os
+import base64
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -9,131 +12,128 @@ from gvm.protocols.gmp import Gmp
 from gvm.transforms import EtreeCheckCommandTransform
 
 # ==========================================
-# KONFIGURACJA SKANERA I RAPORTOWANIA
+# KONFIGURACJA SYSTEMU I RAPORTOWANIA
 # ==========================================
-# Ścieżka do gniazda komunikacyjnego kontenera
-PATH_TO_SOCKET = "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock" 
-TARGET_IP = "192.168.1.0/24" # Adres Twojej sieci
+# Ścieżka do socketu (stała dzięki wymuszonej nazwie projektu w Install.sh)
+PATH_TO_SOCKET = "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock"
 
-EMAIL_SENDER = "twoj_mail@gmail.com"
-EMAIL_PASSWORD = "twoje_16_znakowe_haslo_aplikacji"
-EMAIL_RECEIVER = "twoj_mail@gmail.com"
+# Funkcja wykrywająca lokalne IP komputera (aby skaner zawsze miał cel)
+def pobierz_lokalne_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
 
-def wyslij_email(raport_data, nazwa_pliku):
-    print("[+] Przygotowuję wysyłkę prawdziwego raportu...")
+TARGET_IP = pobierz_lokalne_ip()
+
+# Dane do wysyłki e-mail
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+EMAIL_SENDER = "basketkuba.05@gmail.com"
+EMAIL_PASSWORD = "bhck irya mxdj xdec" 
+EMAIL_RECEIVER = "basketkuba.05@gmail.com"
+
+def wyslij_email(pdf_data):
+    print(f"[+] Wysyłanie raportu na adres: {EMAIL_RECEIVER}")
     msg = MIMEMultipart()
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
-    msg['Subject'] = f"RAPORT BEZPIECZEŃSTWA: Sieć {TARGET_IP}"
+    msg['Subject'] = f"Raport Bezpieczeństwa N01 - Cel: {TARGET_IP}"
     
-    body = (
-        f"Witaj,\n\n"
-        f"W załączeniu przesyłam pełny, automatycznie wygenerowany raport podatności "
-        f"dla sieci {TARGET_IP} w formacie TXT (obejście problemu PDF na ARM).\n\n"
-        f"Pozdrawiam,\nSystem N01 (BSO)"
-    )
+    body = f"Dzień dobry,\n\nAutomatyczny skan podatności dla adresu {TARGET_IP} został zakończony.\nRaport PDF w załączniku.\n\nPozdrawiamy,\nSystem N01 (BSO)"
     msg.attach(MIMEText(body, 'plain'))
     
-    # Dołączanie surowych danych
     part = MIMEBase('application', 'octet-stream')
-    part.set_payload(raport_data)
+    part.set_payload(pdf_data)
     encoders.encode_base64(part)
-    part.add_header('Content-Disposition', f"attachment; filename={nazwa_pliku}")
+    part.add_header('Content-Disposition', 'attachment; filename="Raport_Bezpieczenstwa.pdf"')
     msg.attach(part)
 
     try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("[+] Raport wysłany pomyślnie na Twój e-mail!")
+        print("[+] E-mail wysłany!")
     except Exception as e:
-        print(f"[-] Błąd SMTP (Sprawdź hasło aplikacji): {e}")
+        print(f"[-] Błąd SMTP: {e}")
 
 def prowadz_skanowanie():
-    print("[+] Łączenie z silnikiem Greenbone (Unix Socket)...")
+    print(f"[!] Rozpoczynam procedurę dla celu: {TARGET_IP}")
+    if not os.path.exists(PATH_TO_SOCKET):
+        raise Exception("Brak gniazda API. Silnik Greenbone jeszcze się uruchamia.")
+
     connection = UnixSocketConnection(path=PATH_TO_SOCKET)
     transform = EtreeCheckCommandTransform()
     
     with Gmp(connection=connection, transform=transform) as gmp:
-        print("[+] Logowanie do API (admin/admin)...")
         gmp.authenticate("admin", "admin")
         
-        print("[+] Pobieranie domyślnej listy portów do skanowania...")
-        port_lists_response = gmp.get_port_lists()
-        port_list_id = port_lists_response.find('.//port_list').get('id')
+        # Sprawdzenie dostępności konfiguracji (czy bazy się pobrały)
+        configs = gmp.get_scan_configs()
+        config_id = None
+        for c in configs.findall('.//config'):
+            if "Full and fast" in c.find('name').text:
+                config_id = c.get('id')
+                break
+        
+        if not config_id:
+            raise Exception("Bazy NVT wciąż się synchronizują. Spróbuj za 15 minut.")
 
-        print(f"[+] Konfiguracja celu skanowania: {TARGET_IP}")
-        response = gmp.create_target(
+        # Pobranie portów
+        port_list_id = gmp.get_port_lists()[0].get('id')
+
+        # Tworzenie celu (z opcją Consider Alive - ważne!)
+        print("[+] Tworzenie celu skanowania...")
+        target_res = gmp.create_target(
             name=f"Skan_{int(time.time())}", 
             hosts=[TARGET_IP], 
-            port_list_id=port_list_id
+            port_list_id=port_list_id,
+            alive_test="Consider Alive"
         )
-        target_id = response.get('id')
+        target_id = target_res.get('id')
         
-        configs = gmp.get_scan_configs()
-        config_id = configs[0].get('id') 
-        
-        print("[+] Tworzenie zadania skanowania...")
-        task = gmp.create_task(
-            name="Zadanie BSO - Automatyczne", 
-            config_id=config_id, 
-            target_id=target_id, 
-            scanner_id="08b69003-5fc2-4037-a479-93b440211c73"
-        )
+        # Pobranie skanera
+        scanner_id = "08b69003-5fc2-4037-a479-93b440211c73" # Domyślny OpenVAS
+
+        # Zadanie
+        print("[+] Startowanie zadania...")
+        task = gmp.create_task(name=f"Zadanie_{TARGET_IP}", config_id=config_id, target_id=target_id, scanner_id=scanner_id)
         task_id = task.get('id')
-        
-        print("[+] Uruchamianie skanera. To potrwa (od 15 minut do paru godzin zależnie od sieci)...")
         gmp.start_task(task_id)
         
         while True:
             t = gmp.get_task(task_id)
             status = t.find(".//status").text
-            
-            progress_elem = t.find(".//progress")
-            progress = progress_elem.text if progress_elem is not None else "0"
-            
-            print(f"[*] Status: {status} ({progress}%)")
-            
-            if status in ["Done", "Stopped", "Finished"]:
-                break
-                
+            prog = t.find(".//progress").text if t.find(".//progress") is not None else "0"
+            print(f"[*] Postęp: {status} ({prog}%)")
+            if status in ["Done", "Stopped", "Finished"]: break
             time.sleep(30)
             
+        # Pobieranie raportu PDF
+        print("[+] Generowanie PDF...")
         report_id = t.find(".//last_report/report").get("id")
         
-        print("[+] Wyszukiwanie formatu TXT w bazie serwera (obejscie problemu architektury ARM)...")
-        formats_response = gmp.get_report_formats()
-        txt_format_id = None
-        
-        for f in formats_response.findall('.//report_format'):
-            if f.find('name').text == 'TXT':
-                txt_format_id = f.get('id')
+        pdf_format_id = None
+        for f in gmp.get_report_formats().findall('.//report_format'):
+            if f.find('name').text == 'PDF':
+                pdf_format_id = f.get('id')
                 break
                 
-        if not txt_format_id:
-            raise Exception("Nie znaleziono formatu TXT!")
-        
-        print("[+] Pobieranie surowego raportu tekstowego...")
-        report = gmp.get_report(report_id, report_format_id=txt_format_id, ignore_pagination=True)
-        
-        import base64
-        txt_content = base64.b64decode(report.find(".//report").text)
-        
-        return txt_content
+        report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
+        return base64.b64decode(report.find(".//report").text)
 
 if __name__ == "__main__":
-    print("="*50)
-    print(" PEŁNOPRAWNY SYSTEM SKANOWANIA SIECI (API GMP)")
-    print("="*50)
-    
+    if os.geteuid() != 0:
+        print("Uruchom jako root (sudo)!")
+        exit(1)
     try:
-        txt_data = prowadz_skanowanie()
-        wyslij_email(txt_data, "Prawdziwy_Raport_Sieci.txt")
+        pdf = prowadz_skanowanie()
+        wyslij_email(pdf)
     except Exception as e:
-        print(f"[-] Otrzymano błąd z silnika: {e}")
-        
-    print("="*50)
-    print(" ZADANIE ZAKOŃCZONE")
-    print("="*50)
+        print(f"[-] BŁĄD: {e}")
