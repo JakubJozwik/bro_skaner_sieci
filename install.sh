@@ -25,7 +25,7 @@ curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/c
 
 # --- NAPRAWA KONFLIKTU PORTÓW (Ważne dla Windows/VMware) ---
 # Zamieniamy port 443 na 9392, aby uniknąć błędu "Port already in use"
-sed -i 's/- 127.0.0.1:443:8080/- 127.0.0.1:8081:8080/g' compose.yaml
+sed -i 's/- 127.0.0.1:443:8080/- 127.0.0.1:8085:8080/g' compose.yaml
 
 # Pobieranie Twojego skryptu skanującego z GitHuba
 curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/refs/heads/main/skaner.py" -o skaner.py
