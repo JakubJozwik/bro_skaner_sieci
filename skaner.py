@@ -4,9 +4,9 @@ from email.mime.text import MIMEText
 
 # Ścieżka musi idealnie pasować do PROJECT_NAME z Install.sh
 PATH_TO_SOCKET = "/var/lib/docker/volumes/bso-n01_gvmd_socket_vol/_data/gvmd.sock"
-EMAIL_SENDER = "basketkuba.05@gmail.com"
-EMAIL_PASSWORD = "bhck irya mxdj xdec" 
-EMAIL_RECEIVER = "basketkuba.05@gmail.com"
+EMAIL_SENDER = "WPISZ_MAIL"
+EMAIL_PASSWORD = "wpisz_haslo" 
+EMAIL_RECEIVER = "wpisz_mail"
 
 def pobierz_ip():
     try:
