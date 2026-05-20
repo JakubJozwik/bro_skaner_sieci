@@ -10,6 +10,7 @@ from gvm.connections import UnixSocketConnection
 from gvm.protocols.gmp import Gmp
 from gvm.transforms import EtreeCheckCommandTransform
 
+
 def load_env(path):
     if not os.path.exists(path):
         return
@@ -21,10 +22,14 @@ def load_env(path):
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
+
 # Ładujemy .env jeśli istnieje
 load_env("/opt/bso_skaner/.env")
 
-PATH_TO_SOCKET = os.getenv("PATH_TO_SOCKET", "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock")
+PATH_TO_SOCKET = os.getenv(
+    "PATH_TO_SOCKET",
+    "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock",
+)
 TARGET_IP = os.getenv("TARGET_IP", "192.168.1.0/24")
 
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
@@ -36,10 +41,14 @@ EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 GVM_USER = os.getenv("GVM_USER", "admin")
 GVM_PASSWORD = os.getenv("GVM_PASSWORD", "admin")
 
+
 def require_env():
     missing = [k for k in ["EMAIL_SENDER", "EMAIL_PASSWORD", "EMAIL_RECEIVER"] if not os.getenv(k)]
     if missing:
-        raise RuntimeError(f"Brak wymaganych zmiennych środowiskowych: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Brak wymaganych zmiennych środowiskowych: {', '.join(missing)}"
+        )
+
 
 def wyslij_email(pdf_data, nazwa_pliku):
     print("[+] Wysyłka raportu e-mail...")
@@ -49,10 +58,10 @@ def wyslij_email(pdf_data, nazwa_pliku):
     msg["Subject"] = f"RAPORT BEZPIECZEŃSTWA: Sieć {TARGET_IP}"
 
     body = (
-        f"Witaj,\n\n"
+        "Witaj,\n\n"
         f"W załączeniu przesyłam raport podatności dla sieci {TARGET_IP}.\n"
-        f"Raport wygenerowany automatycznie przez Greenbone.\n\n"
-        f"Pozdrawiam,\nSystem N01"
+        "Raport wygenerowany automatycznie przez Greenbone.\n\n"
+        "Pozdrawiam,\nSystem N01"
     )
     msg.attach(MIMEText(body, "plain"))
 
@@ -69,6 +78,7 @@ def wyslij_email(pdf_data, nazwa_pliku):
     server.quit()
     print("[+] Raport wysłany poprawnie.")
 
+
 def wait_for_gvm(gmp, timeout=1800):
     print("[+] Oczekiwanie na gotowość GVM (do 30 minut)...")
     start = time.time()
@@ -82,12 +92,14 @@ def wait_for_gvm(gmp, timeout=1800):
                 raise TimeoutError("GVM nie wystartował w wymaganym czasie.")
             time.sleep(20)
 
+
 def pick_by_name(xml, tag, name):
     for el in xml.findall(f".//{tag}"):
         n = el.find("name")
         if n is not None and n.text == name:
             return el.get("id")
     return None
+
 
 def prowadz_skanowanie():
     print("[+] Łączenie z silnikiem Greenbone...")
@@ -114,7 +126,7 @@ def prowadz_skanowanie():
         response = gmp.create_target(
             name=f"Skan_{int(time.time())}",
             hosts=[TARGET_IP],
-            port_list_id=port_list_id
+            port_list_id=port_list_id,
         )
         target_id = response.get("id")
 
@@ -142,7 +154,7 @@ def prowadz_skanowanie():
             name="Zadanie BSO - Automatyczne",
             config_id=config_id,
             target_id=target_id,
-            scanner_id=scanner_id
+            scanner_id=scanner_id,
         )
         task_id = task.get("id")
 
@@ -164,13 +176,18 @@ def prowadz_skanowanie():
         formats = gmp.get_report_formats()
         pdf_format_id = pick_by_name(formats, "report_format", "PDF")
         if not pdf_format_id:
-            raise RuntimeError("Nie znaleziono formatu PDF. Poczekaj na feed report-formats.")
+            raise RuntimeError(
+                "Nie znaleziono formatu PDF. Poczekaj na feed report-formats."
+            )
 
         print("[+] Generowanie raportu PDF...")
-        report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
+        report = gmp.get_report(
+            report_id, report_format_id=pdf_format_id, ignore_pagination=True
+        )
         pdf_content = base64.b64decode(report.find(".//report").text)
 
         return pdf_content
+
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -188,32 +205,4 @@ if __name__ == "__main__":
 
     print("=" * 50)
     print(" ZADANIE ZAKOŃCZONE")
-    print("=" * 50)            print(f"[*] Status: {status}")
-            if status in ["Done", "Stopped", "Finished"]: break
-            time.sleep(20)
-            
-        print("[+] Pobieranie danych...")
-        time.sleep(15)
-        
-        all_r = gmp.get_reports()
-        rid = None
-        for r in all_r.findall(".//report"):
-            if r.find("task").get("id") == tid:
-                rid = r.get("id")
-                break
-        
-        res = gmp.get_report(rid, details=True)
-        wyniki = f"RAPORT N01 DLA: {cel}\n" + "="*30 + "\n"
-        found = False
-        for rs in res.findall(".//results/result"):
-            found = True
-            wyniki += f"[{rs.find('severity').text}] {rs.find('name').text} (Port: {rs.find('port').text})\n"
-        
-        if not found: wyniki += "Brak podatnosci. System jest bezpieczny."
-        return wyniki, cel
-
-if __name__ == "__main__":
-    try:
-        r, c = prowadz_skanowanie()
-        wyslij_email(r, c)
-    except Exception as e: print(f"[-] Blad: {e}")
+    print("=" * 50)
