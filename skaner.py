@@ -1,68 +1,194 @@
-import time, smtplib, socket, os, xml.etree.ElementTree as ET
+import os
+import time
+import base64
+import smtplib
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
+from email import encoders
+from gvm.connections import UnixSocketConnection
+from gvm.protocols.gmp import Gmp
+from gvm.transforms import EtreeCheckCommandTransform
 
-# Ścieżka musi idealnie pasować do PROJECT_NAME z Install.sh
-PATH_TO_SOCKET = "/var/lib/docker/volumes/bso-n01_gvmd_socket_vol/_data/gvmd.sock"
-EMAIL_SENDER = "WPISZ_MAIL"
-EMAIL_PASSWORD = "wpisz_haslo" 
-EMAIL_RECEIVER = "wpisz_mail"
+def load_env(path):
+    if not os.path.exists(path):
+        return
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
 
-def pobierz_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except: return "127.0.0.1"
+# Ładujemy .env jeśli istnieje
+load_env("/opt/bso_skaner/.env")
 
-def wyslij_email(tresc, cel):
+PATH_TO_SOCKET = os.getenv("PATH_TO_SOCKET", "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock")
+TARGET_IP = os.getenv("TARGET_IP", "192.168.1.0/24")
+
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
+
+GVM_USER = os.getenv("GVM_USER", "admin")
+GVM_PASSWORD = os.getenv("GVM_PASSWORD", "admin")
+
+def require_env():
+    missing = [k for k in ["EMAIL_SENDER", "EMAIL_PASSWORD", "EMAIL_RECEIVER"] if not os.getenv(k)]
+    if missing:
+        raise RuntimeError(f"Brak wymaganych zmiennych środowiskowych: {', '.join(missing)}")
+
+def wyslij_email(pdf_data, nazwa_pliku):
+    print("[+] Wysyłka raportu e-mail...")
     msg = MIMEMultipart()
-    msg['From'] = EMAIL_SENDER
-    msg['To'] = EMAIL_RECEIVER
-    msg['Subject'] = f"RAPORT BEZPIECZENSTWA N01 - {cel}"
-    msg.attach(MIMEText(tresc, 'plain'))
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print("[+] MAIL WYSLANY!")
-    except Exception as e: print(f"[-] Blad SMTP: {e}")
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = EMAIL_RECEIVER
+    msg["Subject"] = f"RAPORT BEZPIECZEŃSTWA: Sieć {TARGET_IP}"
+
+    body = (
+        f"Witaj,\n\n"
+        f"W załączeniu przesyłam raport podatności dla sieci {TARGET_IP}.\n"
+        f"Raport wygenerowany automatycznie przez Greenbone.\n\n"
+        f"Pozdrawiam,\nSystem N01"
+    )
+    msg.attach(MIMEText(body, "plain"))
+
+    part = MIMEBase("application", "octet-stream")
+    part.set_payload(pdf_data)
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f"attachment; filename={nazwa_pliku}")
+    msg.attach(part)
+
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.starttls()
+    server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+    server.send_message(msg)
+    server.quit()
+    print("[+] Raport wysłany poprawnie.")
+
+def wait_for_gvm(gmp, timeout=1800):
+    print("[+] Oczekiwanie na gotowość GVM (do 30 minut)...")
+    start = time.time()
+    while True:
+        try:
+            gmp.get_version()
+            print("[+] GVM jest gotowy.")
+            return
+        except Exception:
+            if time.time() - start > timeout:
+                raise TimeoutError("GVM nie wystartował w wymaganym czasie.")
+            time.sleep(20)
+
+def pick_by_name(xml, tag, name):
+    for el in xml.findall(f".//{tag}"):
+        n = el.find("name")
+        if n is not None and n.text == name:
+            return el.get("id")
+    return None
 
 def prowadz_skanowanie():
-    from gvm.connections import UnixSocketConnection
-    from gvm.protocols.gmp import Gmp
-    from gvm.transforms import EtreeCheckCommandTransform
+    print("[+] Łączenie z silnikiem Greenbone...")
+    connection = UnixSocketConnection(path=PATH_TO_SOCKET)
+    transform = EtreeCheckCommandTransform()
 
-    cel = pobierz_ip()
-    print(f"[!] Start skanowania: {cel}")
-    
-    if not os.path.exists(PATH_TO_SOCKET):
-        raise Exception("Gniazdo API (Socket) nie istnieje. Poczekaj 10 minut.")
+    with Gmp(connection=connection, transform=transform) as gmp:
+        wait_for_gvm(gmp)
+        print("[+] Logowanie do API...")
+        gmp.authenticate(GVM_USER, GVM_PASSWORD)
 
-    with Gmp(connection=UnixSocketConnection(path=PATH_TO_SOCKET), transform=EtreeCheckCommandTransform()) as gmp:
-        gmp.authenticate("admin", "admin")
-        
-        try:
-            cfg_id = gmp.get_scan_configs()[0].get('id')
-            port_id = gmp.get_port_lists()[0].get('id')
-        except:
-            raise Exception("Skaner wciaz laduje bazy NVT. Sprobuj za 15 minut.")
-            
-        tgt = gmp.create_target(name=f"S_{int(time.time())}", hosts=[cel], port_list_id=port_id, alive_test="Consider Alive")
-        tgt_id = tgt.get('id')
-        
-        task = gmp.create_task(name=f"Z_{cel}", config_id=cfg_id, target_id=tgt_id, scanner_id="08b69003-5fc2-4037-a479-93b440211c73")
-        tid = task.get('id')
-        gmp.start_task(tid)
-        
+        # Port list
+        port_lists = gmp.get_port_lists()
+        port_list_id = pick_by_name(port_lists, "port_list", "All IANA assigned TCP")
+        if not port_list_id:
+            # fallback: pierwszy dostępny
+            pl = port_lists.find(".//port_list")
+            if pl is None:
+                raise RuntimeError("Brak list portów – GVM nie jest gotowy.")
+            port_list_id = pl.get("id")
+
+        # Target
+        print(f"[+] Tworzenie celu: {TARGET_IP}")
+        response = gmp.create_target(
+            name=f"Skan_{int(time.time())}",
+            hosts=[TARGET_IP],
+            port_list_id=port_list_id
+        )
+        target_id = response.get("id")
+
+        # Config
+        configs = gmp.get_scan_configs()
+        config_id = pick_by_name(configs, "config", "Full and fast")
+        if not config_id:
+            cfg = configs.find(".//config")
+            if cfg is None:
+                raise RuntimeError("Brak konfiguracji skanowania.")
+            config_id = cfg.get("id")
+
+        # Scanner
+        scanners = gmp.get_scanners()
+        scanner_id = pick_by_name(scanners, "scanner", "OpenVAS Default")
+        if not scanner_id:
+            sc = scanners.find(".//scanner")
+            if sc is None:
+                raise RuntimeError("Brak skanera.")
+            scanner_id = sc.get("id")
+
+        # Task
+        print("[+] Tworzenie zadania...")
+        task = gmp.create_task(
+            name="Zadanie BSO - Automatyczne",
+            config_id=config_id,
+            target_id=target_id,
+            scanner_id=scanner_id
+        )
+        task_id = task.get("id")
+
+        print("[+] Start skanowania...")
+        gmp.start_task(task_id)
+
         while True:
-            t = gmp.get_task(tid)
+            t = gmp.get_task(task_id)
             status = t.find(".//status").text
-            print(f"[*] Status: {status}")
+            progress_elem = t.find(".//progress")
+            progress = progress_elem.text if progress_elem is not None else "0"
+            print(f"[*] Status: {status} ({progress}%)")
+            if status in ["Done", "Stopped", "Finished"]:
+                break
+            time.sleep(30)
+
+        report_id = t.find(".//last_report/report").get("id")
+
+        formats = gmp.get_report_formats()
+        pdf_format_id = pick_by_name(formats, "report_format", "PDF")
+        if not pdf_format_id:
+            raise RuntimeError("Nie znaleziono formatu PDF. Poczekaj na feed report-formats.")
+
+        print("[+] Generowanie raportu PDF...")
+        report = gmp.get_report(report_id, report_format_id=pdf_format_id, ignore_pagination=True)
+        pdf_content = base64.b64decode(report.find(".//report").text)
+
+        return pdf_content
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print(" SYSTEM SKANOWANIA N01 (Greenbone + GMP)")
+    print("=" * 50)
+
+    require_env()
+
+    try:
+        pdf_data = prowadz_skanowanie()
+        wyslij_email(pdf_data, "Raport_Sieci.pdf")
+    except Exception as e:
+        print(f"[-] Błąd: {e}")
+        print("    Jeśli to błąd feedów, odczekaj ~1h i uruchom ponownie.")
+
+    print("=" * 50)
+    print(" ZADANIE ZAKOŃCZONE")
+    print("=" * 50)            print(f"[*] Status: {status}")
             if status in ["Done", "Stopped", "Finished"]: break
             time.sleep(20)
             
