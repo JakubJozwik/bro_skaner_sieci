@@ -31,13 +31,7 @@ echo "5/7 Pobieranie compose.yaml (Greenbone)..."
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
 
 echo "6/7 Pobieranie skryptu skanera..."
-cat > "$DIR/skaner.py" <<'PYCODE'
-# (plik zostanie wklejony poniżej w odpowiedzi — nie edytuj tutaj)
-PYCODE
-
-# Nadpisanie treści skanera poniżej (bezpośrednio z odpowiedzi)
-# To miejsce zostanie zastąpione przez Ciebie po skopiowaniu pliku skaner.py
-
+curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/main/skaner.py" -o skaner.py
 chmod +x "$DIR/skaner.py"
 
 echo "7/7 Konfiguracja .env (dane e-mail i zakres skanowania)..."
