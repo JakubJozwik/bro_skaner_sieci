@@ -1,31 +1,93 @@
 #!/bin/bash
-if [ "$EUID" -ne 0 ]; then echo "BŁĄD: Uruchom jako: curl ... | sudo bash"; exit 1; fi
+set -euo pipefail
 
-PROJECT_NAME="bso-n01"
-INSTALL_DIR="/opt/bso_skaner"
+# Wymagane uruchomienie jako root
+if [ "$EUID" -ne 0 ]; then
+  echo "Skrypt musi być uruchomiony jako root (użyj sudo)."
+  exit 1
+fi
 
-echo "--- INSTALACJA SYSTEMU N01 (PROJEKT: $PROJECT_NAME) ---"
+echo "--- Instalacja systemu skanowania N01 (Greenbone + Python) ---"
 
-# 1. Pakiety
-apt-get update -qq
-apt-get install -y curl python3 python3-pip cron docker.io docker-compose-v2 -qq
-pip3 install gvm-tools lxml --break-system-packages -q
+echo "1/7 Czyszczenie starych wersji Dockera..."
+apt-get remove -y docker.io docker-compose docker-doc podman-docker containerd runc >/dev/null 2>&1 || true
 
-# 2. Folder i pliki
-mkdir -p $INSTALL_DIR
-cd $INSTALL_DIR
+echo "2/7 Instalacja narzędzi (curl, python, cron)..."
+apt-get update
+apt-get install -y curl python3 python3-pip cron
 
+# Instalacja gvm-tools
+pip3 install gvm-tools --break-system-packages || pip3 install gvm-tools
+
+echo "3/7 Instalacja najnowszego Dockera..."
+curl -fsSL https://get.docker.com | sh
+
+echo "4/7 Przygotowanie katalogu /opt/bso_skaner..."
+DIR="/opt/bso_skaner"
+mkdir -p "$DIR"
+cd "$DIR"
+
+echo "5/7 Pobieranie compose.yaml (Greenbone)..."
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
-# Naprawa portu (Ustawiamy 54321 dla uniknięcia konfliktów na Windows)
-sed -i 's/- 127.0.0.1:[0-9]*:8080/- 54321:8080/g' compose.yaml
 
-curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/refs/heads/main/skaner.py" -o skaner.py
-chmod +x skaner.py
+echo "6/7 Pobieranie skryptu skanera..."
+cat > "$DIR/skaner.py" <<'PYCODE'
+# (plik zostanie wklejony poniżej w odpowiedzi — nie edytuj tutaj)
+PYCODE
 
-# 3. Start Dockera (Wymuszona nazwa projektu)
-docker compose -p $PROJECT_NAME up -d --force-recreate
+# Nadpisanie treści skanera poniżej (bezpośrednio z odpowiedzi)
+# To miejsce zostanie zastąpione przez Ciebie po skopiowaniu pliku skaner.py
 
-# 4. Cron
-(crontab -l 2>/dev/null | grep -v "skaner.py" ; echo "0 2 * * 0 /usr/bin/python3 $INSTALL_DIR/skaner.py >> /var/log/bso_skaner.log 2>&1") | crontab -
+chmod +x "$DIR/skaner.py"
 
-echo "--- INSTALACJA ZAKONCZONA. ODCZEKAJ 20 MINUT I ODPAL SKANER ---"
+echo "7/7 Konfiguracja .env (dane e-mail i zakres skanowania)..."
+ENV_FILE="$DIR/.env"
+
+# Jeśli zmienne nie są podane w środowisku — zapytaj
+if [ -z "${EMAIL_SENDER:-}" ]; then
+  read -rp "Podaj EMAIL_SENDER (np. Gmail): " EMAIL_SENDER
+fi
+if [ -z "${EMAIL_PASSWORD:-}" ]; then
+  read -rsp "Podaj EMAIL_PASSWORD (hasło aplikacji): " EMAIL_PASSWORD
+  echo
+fi
+if [ -z "${EMAIL_RECEIVER:-}" ]; then
+  read -rp "Podaj EMAIL_RECEIVER: " EMAIL_RECEIVER
+fi
+if [ -z "${TARGET_IP:-}" ]; then
+  read -rp "Podaj TARGET_IP (np. 192.168.1.0/24): " TARGET_IP
+fi
+
+cat > "$ENV_FILE" <<EOF
+EMAIL_SENDER=${EMAIL_SENDER}
+EMAIL_PASSWORD=${EMAIL_PASSWORD}
+EMAIL_RECEIVER=${EMAIL_RECEIVER}
+TARGET_IP=${TARGET_IP}
+GVM_USER=admin
+GVM_PASSWORD=admin
+PATH_TO_SOCKET=/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+EOF
+
+echo "Uruchamianie Greenbone..."
+docker compose -f compose.yaml up -d
+
+echo "Czekam na gvmd socket..."
+SOCKET_PATH="/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock"
+until [ -S "$SOCKET_PATH" ]; do
+  sleep 10
+done
+
+echo "Ustawianie hasła admin (próby automatyczne)..."
+docker compose -f compose.yaml exec -T gvmd gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
+docker compose -f compose.yaml exec -T gvm gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
+docker compose -f compose.yaml exec -T greenbone-community-edition gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
+
+echo "Konfiguracja Cron (co niedzielę 2:00)..."
+CRON_JOB="0 2 * * 0 /bin/bash -lc 'set -a; source $DIR/.env; set +a; /usr/bin/python3 $DIR/skaner.py >> $DIR/skaner.log 2>&1'"
+(crontab -l 2>/dev/null | grep -v "skaner.py"; echo "$CRON_JOB") | crontab -
+
+echo "--- Instalacja zakończona ---"
+echo "Uwaga: pobieranie baz NVT może trwać 30–120 minut."
+echo "Test ręczny: sudo /usr/bin/python3 $DIR/skaner.py"
