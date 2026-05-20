@@ -37,19 +37,19 @@ chmod +x "$DIR/skaner.py"
 echo "7/7 Konfiguracja .env (dane e-mail i zakres skanowania)..."
 ENV_FILE="$DIR/.env"
 
-# Jeśli zmienne nie są podane w środowisku — zapytaj
+# Jeśli zmienne nie są podane w środowisku — zapytaj (z /dev/tty, bo skrypt jest pipowany)
 if [ -z "${EMAIL_SENDER:-}" ]; then
-  read -rp "Podaj EMAIL_SENDER (np. Gmail): " EMAIL_SENDER
+  read -rp "Podaj EMAIL_SENDER (np. Gmail): " EMAIL_SENDER </dev/tty
 fi
 if [ -z "${EMAIL_PASSWORD:-}" ]; then
-  read -rsp "Podaj EMAIL_PASSWORD (hasło aplikacji): " EMAIL_PASSWORD
+  read -rsp "Podaj EMAIL_PASSWORD (hasło aplikacji): " EMAIL_PASSWORD </dev/tty
   echo
 fi
 if [ -z "${EMAIL_RECEIVER:-}" ]; then
-  read -rp "Podaj EMAIL_RECEIVER: " EMAIL_RECEIVER
+  read -rp "Podaj EMAIL_RECEIVER: " EMAIL_RECEIVER </dev/tty
 fi
 if [ -z "${TARGET_IP:-}" ]; then
-  read -rp "Podaj TARGET_IP (np. 192.168.1.0/24): " TARGET_IP
+  read -rp "Podaj TARGET_IP (np. 192.168.1.0/24): " TARGET_IP </dev/tty
 fi
 
 cat > "$ENV_FILE" <<EOF
