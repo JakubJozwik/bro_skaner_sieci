@@ -29,6 +29,8 @@ cd "$DIR"
 
 echo "5/7 Pobieranie compose.yaml (Greenbone)..."
 curl -f -sL "https://raw.githubusercontent.com/greenbone/docs/main/src/_static/compose.yaml" -o compose.yaml
+# ZMIANA: Podmiana portu z 9392 na 8085 dla zgodności z dokumentacją
+sed -i 's/9392:80/8085:80/g' compose.yaml
 
 echo "6/7 Pobieranie skryptu skanera..."
 curl -f -sL "https://raw.githubusercontent.com/JakubJozwik/bro_skaner_sieci/main/skaner.py" -o skaner.py
@@ -37,7 +39,6 @@ chmod +x "$DIR/skaner.py"
 echo "7/7 Konfiguracja .env (dane e-mail i zakres skanowania)..."
 ENV_FILE="$DIR/.env"
 
-# Jeśli zmienne nie są podane w środowisku — zapytaj (z /dev/tty, bo skrypt jest pipowany)
 if [ -z "${EMAIL_SENDER:-}" ]; then
   read -rp "Podaj EMAIL_SENDER (np. Gmail): " EMAIL_SENDER </dev/tty
 fi
