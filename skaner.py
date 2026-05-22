@@ -22,6 +22,8 @@ def load_env(path):
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
+
+# Ładujemy .env jeśli istnieje
 load_env("/opt/bso_skaner/.env")
 
 PATH_TO_SOCKET = os.getenv(
@@ -39,10 +41,14 @@ EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 GVM_USER = os.getenv("GVM_USER", "admin")
 GVM_PASSWORD = os.getenv("GVM_PASSWORD", "admin")
 
+
 def require_env():
     missing = [k for k in ["EMAIL_SENDER", "EMAIL_PASSWORD", "EMAIL_RECEIVER"] if not os.getenv(k)]
     if missing:
-        raise RuntimeError(f"Brak wymaganych zmiennych środowiskowych: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Brak wymaganych zmiennych środowiskowych: {', '.join(missing)}"
+        )
+
 
 def wyslij_email(txt_data, nazwa_pliku):
     print("[+] Wysyłka raportu e-mail...")
@@ -72,6 +78,7 @@ def wyslij_email(txt_data, nazwa_pliku):
     server.quit()
     print("[+] Raport wysłany poprawnie.")
 
+
 def wait_for_gvm(gmp, timeout=1800):
     print("[+] Oczekiwanie na gotowość GVM (do 30 minut)...")
     start = time.time()
@@ -85,12 +92,14 @@ def wait_for_gvm(gmp, timeout=1800):
                 raise TimeoutError("GVM nie wystartował w wymaganym czasie.")
             time.sleep(20)
 
+
 def pick_by_name(xml, tag, name):
     for el in xml.findall(f".//{tag}"):
         n = el.find("name")
         if n is not None and n.text == name:
             return el.get("id")
     return None
+
 
 def prowadz_skanowanie():
     print("[+] Łączenie z silnikiem Greenbone...")
@@ -102,14 +111,17 @@ def prowadz_skanowanie():
         print("[+] Logowanie do API...")
         gmp.authenticate(GVM_USER, GVM_PASSWORD)
 
+        # Port list
         port_lists = gmp.get_port_lists()
         port_list_id = pick_by_name(port_lists, "port_list", "All IANA assigned TCP")
         if not port_list_id:
+            # fallback: pierwszy dostępny
             pl = port_lists.find(".//port_list")
             if pl is None:
                 raise RuntimeError("Brak list portów – GVM nie jest gotowy.")
             port_list_id = pl.get("id")
 
+        # Target
         print(f"[+] Tworzenie celu: {TARGET_IP}")
         response = gmp.create_target(
             name=f"Skan_{int(time.time())}",
@@ -118,6 +130,7 @@ def prowadz_skanowanie():
         )
         target_id = response.get("id")
 
+        # Config
         configs = gmp.get_scan_configs()
         config_id = pick_by_name(configs, "config", "Full and fast")
         if not config_id:
@@ -126,6 +139,7 @@ def prowadz_skanowanie():
                 raise RuntimeError("Brak konfiguracji skanowania.")
             config_id = cfg.get("id")
 
+        # Scanner
         scanners = gmp.get_scanners()
         scanner_id = pick_by_name(scanners, "scanner", "OpenVAS Default")
         if not scanner_id:
@@ -134,6 +148,7 @@ def prowadz_skanowanie():
                 raise RuntimeError("Brak skanera.")
             scanner_id = sc.get("id")
 
+        # Task
         print("[+] Tworzenie zadania...")
         task = gmp.create_task(
             name="Zadanie BSO - Automatyczne",
@@ -157,20 +172,30 @@ def prowadz_skanowanie():
             time.sleep(30)
 
         report_id = t.find(".//last_report/report").get("id")
+
         formats = gmp.get_report_formats()
-        
-        # ZMIANA: Szukamy formatu TXT zamiast PDF
         txt_format_id = pick_by_name(formats, "report_format", "TXT")
         if not txt_format_id:
-            raise RuntimeError("Nie znaleziono formatu TXT. Poczekaj na feed report-formats.")
+            raise RuntimeError(
+                "Nie znaleziono formatu TXT. Poczekaj na feed report-formats."
+            )
 
         print("[+] Generowanie raportu TXT...")
         report = gmp.get_report(
             report_id, report_format_id=txt_format_id, ignore_pagination=True
         )
-        txt_content = base64.b64decode(report.find(".//report").text)
+        
+        report_element = report.find(".//report")
+        
+        # Wyciągamy raport tekstowy z 'ogona' znacznika (specyfika formatowania GMP API)
+        content = report_element.find("report_format").tail
+        if not content:
+            content = "".join(report_element.itertext())
+            
+        txt_content = base64.b64decode(content)
 
         return txt_content
+
 
 if __name__ == "__main__":
     print("=" * 50)
