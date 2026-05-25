@@ -10,22 +10,25 @@ from gvm.connections import UnixSocketConnection
 from gvm.protocols.gmp import Gmp
 from gvm.transforms import EtreeCheckCommandTransform
 
-
+#Ręczny parser pliku .env.
+#Dzięki temu unikamy konieczności instalowania zewnętrznych bibliotek (np. python-dotenv).
 def load_env(path):
     if not os.path.exists(path):
         return
     with open(path, "r") as f:
         for line in f:
             line = line.strip()
+            # Pomijanie pustych linii i komentarzy
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
 
-# Ładujemy .env jeśli istnieje
+# Wczytanie konfiguracji z ukrytego pliku środowiskowego
 load_env("/opt/bso_skaner/.env")
 
+# Mapowanie zmiennych globalnych (z fallbackiem na wartości domyślne)
 PATH_TO_SOCKET = os.getenv(
     "PATH_TO_SOCKET",
     "/var/lib/docker/volumes/greenbone-community-edition_gvmd_socket_vol/_data/gvmd.sock",
@@ -41,7 +44,7 @@ EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 GVM_USER = os.getenv("GVM_USER", "admin")
 GVM_PASSWORD = os.getenv("GVM_PASSWORD", "admin")
 
-
+#walidator zmiennych środowiskowych. przerywa dzialanie skryptu natychmiast, jezeli brakuje danych uwierzytelniajacych
 def require_env():
     missing = [k for k in ["EMAIL_SENDER", "EMAIL_PASSWORD", "EMAIL_RECEIVER"] if not os.getenv(k)]
     if missing:
@@ -49,7 +52,7 @@ def require_env():
             f"Brak wymaganych zmiennych środowiskowych: {', '.join(missing)}"
         )
 
-
+#pakuje odkodowany raport txt jako zalacznik binarnego strumienia i wysyla go przez uwierzytelniony kanal smtp do odbiorcy
 def wyslij_email(txt_data, nazwa_pliku):
     print("[+] Wysyłka raportu e-mail...")
     msg = MIMEMultipart()
@@ -64,13 +67,13 @@ def wyslij_email(txt_data, nazwa_pliku):
         "Pozdrawiam,\nSystem N01"
     )
     msg.attach(MIMEText(body, "plain"))
-
+#przygotowanie zalacznika z raportem
     part = MIMEBase("application", "octet-stream")
     part.set_payload(txt_data)
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", f"attachment; filename={nazwa_pliku}")
     msg.attach(part)
-
+#nawiazywanie polaczenia z mailem i wysylka
     server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
     server.starttls()
     server.login(EMAIL_SENDER, EMAIL_PASSWORD)
@@ -78,9 +81,9 @@ def wyslij_email(txt_data, nazwa_pliku):
     server.quit()
     print("[+] Raport wysłany poprawnie.")
 
-
+#mechanizm oczekujacy na gotowosc daemona gvm. przy pierwszej instalacji zajmuje to troche czasu
 def wait_for_gvm(gmp, timeout=1800):
-    print("[+] Oczekiwanie na gotowość GVM (do 30 minut)...")
+    print("[+] Oczekiwanie na gotowość GVM ...")
     start = time.time()
     while True:
         try:
@@ -92,7 +95,7 @@ def wait_for_gvm(gmp, timeout=1800):
                 raise TimeoutError("GVM nie wystartował w wymaganym czasie.")
             time.sleep(20)
 
-
+#pomocnicza funkcja parsujaca xml zwracane przez api gmp. Do wyszukiwania unikalnych identyfikatorw uuid po nazwie
 def pick_by_name(xml, tag, name):
     for el in xml.findall(f".//{tag}"):
         n = el.find("name")
@@ -100,9 +103,10 @@ def pick_by_name(xml, tag, name):
             return el.get("id")
     return None
 
-
+#main silnik skryptu. realizuje pelny przebieg komunikacji z greenbone api: uwierzytelnienie, definicja celu, konfiguracja, start zadania, pooling, raport.
 def prowadz_skanowanie():
     print("[+] Łączenie z silnikiem Greenbone...")
+    #nawiazqanie lokalnego polaczenia przez socket
     connection = UnixSocketConnection(path=PATH_TO_SOCKET)
     transform = EtreeCheckCommandTransform()
 
@@ -111,17 +115,17 @@ def prowadz_skanowanie():
         print("[+] Logowanie do API...")
         gmp.authenticate(GVM_USER, GVM_PASSWORD)
 
-        # Port list
+        # Port list, okreslenie listy portow do przeskanowania
         port_lists = gmp.get_port_lists()
         port_list_id = pick_by_name(port_lists, "port_list", "All IANA assigned TCP")
         if not port_list_id:
-            # fallback: pierwszy dostępny
+            # fallback: pierwszy dostępny, jesli okresona lista nie istnieje
             pl = port_lists.find(".//port_list")
             if pl is None:
                 raise RuntimeError("Brak list portów – GVM nie jest gotowy.")
             port_list_id = pl.get("id")
 
-        # Target
+        # Target w bazie gvm
         print(f"[+] Tworzenie celu: {TARGET_IP}")
         response = gmp.create_target(
             name=f"Skan_{int(time.time())}",
@@ -130,7 +134,7 @@ def prowadz_skanowanie():
         )
         target_id = response.get("id")
 
-        # Config
+        # Config Wybór profilu skanowania 
         configs = gmp.get_scan_configs()
         config_id = pick_by_name(configs, "config", "Full and fast")
         if not config_id:
@@ -139,7 +143,7 @@ def prowadz_skanowanie():
                 raise RuntimeError("Brak konfiguracji skanowania.")
             config_id = cfg.get("id")
 
-        # Scanner
+        # Scanner Przypisanie domyślnego skanera (OpenVAS)
         scanners = gmp.get_scanners()
         scanner_id = pick_by_name(scanners, "scanner", "OpenVAS Default")
         if not scanner_id:
@@ -148,7 +152,7 @@ def prowadz_skanowanie():
                 raise RuntimeError("Brak skanera.")
             scanner_id = sc.get("id")
 
-        # Task
+        # Sklejenie celu, profilu i skanera w jedno Zadanie
         print("[+] Tworzenie zadania...")
         task = gmp.create_task(
             name="Zadanie BSO - Automatyczne",
@@ -157,10 +161,10 @@ def prowadz_skanowanie():
             scanner_id=scanner_id,
         )
         task_id = task.get("id")
-
+# Uruchomienie fizycznego procesu skanowania
         print("[+] Start skanowania...")
         gmp.start_task(task_id)
-
+#Pętla nasłuchująca statusu wykonywania zadania (odświeżana co 30 sekund)
         while True:
             t = gmp.get_task(task_id)
             status = t.find(".//status").text
@@ -170,9 +174,9 @@ def prowadz_skanowanie():
             if status in ["Done", "Stopped", "Finished"]:
                 break
             time.sleep(30)
-
+#pobranie ID wygenerowanego przez system raportu
         report_id = t.find(".//last_report/report").get("id")
-
+#konfiguracja formatu eksportu na TXT
         formats = gmp.get_report_formats()
         txt_format_id = pick_by_name(formats, "report_format", "TXT")
         if not txt_format_id:
@@ -186,12 +190,12 @@ def prowadz_skanowanie():
         )
         
         report_element = report.find(".//report")
-        
-        # Wyciągamy raport tekstowy z 'ogona' znacznika (specyfika formatowania GMP API)
+        # Wyciągamy raport tekstowy z 'ogona' znacznika. 
+        # Jest to obejście na specyficzne formatowanie API Greenbone
         content = report_element.find("report_format").tail
         if not content:
             content = "".join(report_element.itertext())
-            
+            # Zdekodowanie natywnego formatu base64 zwracanego przez API do czystego tekstu
         txt_content = base64.b64decode(content)
 
         return txt_content
@@ -201,11 +205,13 @@ if __name__ == "__main__":
     print("=" * 50)
     print(" SYSTEM SKANOWANIA N01 (Raport TXT)")
     print("=" * 50)
-
+#weryfikacja srodowiska przed wykonaniem operacji gvm
     require_env()
 
     try:
+        #zlecenie skanu i odebranie danych strumieniowych
         txt_data = prowadz_skanowanie()
+        #wysyl;ka odkodowwanych danych przez smtp
         wyslij_email(txt_data, "Raport_Sieci.txt")
     except Exception as e:
         print(f"[-] Błąd: {e}")
