@@ -52,7 +52,7 @@ if [ -z "${EMAIL_RECEIVER:-}" ]; then
   read -rp "Podaj EMAIL_RECEIVER: " EMAIL_RECEIVER </dev/tty
 fi
 if [ -z "${TARGET_IP:-}" ]; then
-  read -rp "Podaj TARGET_IP (np. 192.168.1.0/24): " TARGET_IP </dev/tty
+  read -rp "Podaj TARGET_IP (np. 127.0.0.1): " TARGET_IP </dev/tty
 fi
 
 cat > "$ENV_FILE" <<EOF
@@ -76,14 +76,21 @@ until [ -S "$SOCKET_PATH" ]; do
   sleep 10
 done
 
-echo "Ustawianie hasła admin (próby automatyczne)..."
-docker compose -f compose.yaml exec -T gvmd gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
-docker compose -f compose.yaml exec -T gvm gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
-docker compose -f compose.yaml exec -T greenbone-community-edition gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
+# Dodajemy bufor czasu, żeby baza danych zdążyła wstać po utworzeniu gniazda
+sleep 15
+
+# Tymczasowo wyłączamy bezpieczniki basha, aby błąd Dockera lub pustego Crona nie ubił skryptu
+set +euo pipefail
+
+echo "Ustawianie hasła admin..."
+docker compose -f compose.yaml exec -T gvmd gvmd --user=admin --new-password="admin" >/dev/null 2>&1
 
 echo "Konfiguracja Cron (co niedzielę 2:00)..."
 CRON_JOB="0 2 * * 0 /bin/bash -lc 'set -a; source $DIR/.env; set +a; /usr/bin/python3 $DIR/skaner.py >> $DIR/skaner.log 2>&1'"
-(crontab -l 2>/dev/null | grep -v "skaner.py"; echo "$CRON_JOB") | crontab -
+(crontab -l 2>/dev/null | grep -v "skaner.py" || true; echo "$CRON_JOB") | crontab -
+
+# Włączamy bezpieczniki z powrotem
+set -euo pipefail
 
 echo "--- Instalacja zakończona ---"
 echo "Uwaga: pobieranie baz NVT może trwać 30–120 minut."
