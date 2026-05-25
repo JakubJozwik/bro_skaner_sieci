@@ -179,7 +179,7 @@ while True:
                 break
             time.sleep(30)
 #pobranie ID wygenerowanego przez system raportu
-        report_id = t.find(".//last_report/report").get("id")
+report_id = t.find(".//last_report/report").get("id")
 #konfiguracja formatu eksportu na TXT
         formats = gmp.get_report_formats()
         txt_format_id = pick_by_name(formats, "report_format", "TXT")
