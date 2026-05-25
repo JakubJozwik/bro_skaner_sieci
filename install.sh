@@ -76,14 +76,21 @@ until [ -S "$SOCKET_PATH" ]; do
   sleep 10
 done
 
-echo "Ustawianie hasła admin (w tle)..."
-# Używamy || true, aby skrypt w Bashu NIGDY się tu nie zatrzymał, nawet jeśli baza jeszcze wstaje.
-# Domyślnie kontenery Community i tak mają hasło admin/admin, więc ten krok to tylko formalność.
-docker compose -f compose.yaml exec -T gvmd gvmd --user=admin --new-password="admin" >/dev/null 2>&1 || true
+# Dodajemy bufor czasu, żeby baza danych zdążyła wstać po utworzeniu gniazda
+sleep 15
+
+# Tymczasowo wyłączamy bezpieczniki basha, aby błąd Dockera lub pustego Crona nie ubił skryptu
+set +euo pipefail
+
+echo "Ustawianie hasła admin..."
+docker compose -f compose.yaml exec -T gvmd gvmd --user=admin --new-password="admin" >/dev/null 2>&1
 
 echo "Konfiguracja Cron (co niedzielę 2:00)..."
 CRON_JOB="0 2 * * 0 /bin/bash -lc 'set -a; source $DIR/.env; set +a; /usr/bin/python3 $DIR/skaner.py >> $DIR/skaner.log 2>&1'"
-(crontab -l 2>/dev/null | grep -v "skaner.py" || true; echo "$CRON_JOB") | crontab - || true
+(crontab -l 2>/dev/null | grep -v "skaner.py" || true; echo "$CRON_JOB") | crontab -
+
+# Włączamy bezpieczniki z powrotem
+set -euo pipefail
 
 echo "--- Instalacja zakończona ---"
 echo "Uwaga: pobieranie baz NVT może trwać 30–120 minut."
