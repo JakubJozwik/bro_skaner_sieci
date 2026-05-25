@@ -165,12 +165,16 @@ def prowadz_skanowanie():
         print("[+] Start skanowania...")
         gmp.start_task(task_id)
 #Pętla nasłuchująca statusu wykonywania zadania (odświeżana co 30 sekund)
-        while True:
+while True:
             t = gmp.get_task(task_id)
             status = t.find(".//status").text
             progress_elem = t.find(".//progress")
             progress = progress_elem.text if progress_elem is not None else "0"
-            print(f"[*] Status: {status} ({progress}%)")
+            
+            # KOSMETYKA: Wymuszenie 100% na ekranie dla estetyki logów
+            display_progress = "100" if status == "Done" else progress
+            
+            print(f"[*] Status: {status} ({display_progress}%)")
             if status in ["Done", "Stopped", "Finished"]:
                 break
             time.sleep(30)
