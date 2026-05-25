@@ -181,29 +181,27 @@ while True:
 #pobranie ID wygenerowanego przez system raportu
 report_id = t.find(".//last_report/report").get("id")
 #konfiguracja formatu eksportu na TXT
-        formats = gmp.get_report_formats()
-        txt_format_id = pick_by_name(formats, "report_format", "TXT")
-        if not txt_format_id:
+formats = gmp.get_report_formats()
+txt_format_id = pick_by_name(formats, "report_format", "TXT")
+ if not txt_format_id:
             raise RuntimeError(
                 "Nie znaleziono formatu TXT. Poczekaj na feed report-formats."
             )
 
-        print("[+] Generowanie raportu TXT...")
-        report = gmp.get_report(
+print("[+] Generowanie raportu TXT...")
+report = gmp.get_report(
             report_id, report_format_id=txt_format_id, ignore_pagination=True
         )
         
-        report_element = report.find(".//report")
+report_element = report.find(".//report")
         # Wyciągamy raport tekstowy z 'ogona' znacznika. 
         # Jest to obejście na specyficzne formatowanie API Greenbone
-        content = report_element.find("report_format").tail
-        if not content:
+content = report_element.find("report_format").tail
+if not content:
             content = "".join(report_element.itertext())
             # Zdekodowanie natywnego formatu base64 zwracanego przez API do czystego tekstu
-        txt_content = base64.b64decode(content)
-
-        return txt_content
-
+txt_content = base64.b64decode(content)
+return txt_content
 
 if __name__ == "__main__":
     print("=" * 50)
