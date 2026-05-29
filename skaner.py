@@ -174,7 +174,6 @@ def prowadz_skanowanie():
             progress_elem = t.find(".//progress")
             progress = progress_elem.text if progress_elem is not None else "0"
             
-            # KOSMETYKA: Wymuszenie 100% na ekranie dla estetyki logów
             display_progress = "100" if status == "Done" else progress
             
             print(f"[*] Status: {status} ({display_progress}%)")
@@ -200,8 +199,6 @@ def prowadz_skanowanie():
         
         report_element = report.find(".//report")
         
-        # Wyciągamy raport tekstowy z 'ogona' znacznika. 
-        # Jest to obejście na specyficzne formatowanie API Greenbone
         content = report_element.find("report_format").tail
         if not content:
             content = "".join(report_element.itertext())
@@ -226,7 +223,6 @@ if __name__ == "__main__":
         wyslij_email(txt_data, "Raport_Sieci.txt")
     except Exception as e:
         print(f"[-] Błąd: {e}")
-        print("    Jeśli to błąd feedów, odczekaj ~1h i uruchom ponownie.")
 
     print("=" * 50)
     print(" ZADANIE ZAKOŃCZONE")
